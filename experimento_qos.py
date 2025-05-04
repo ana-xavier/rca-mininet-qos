@@ -8,6 +8,7 @@ from mininet.log import setLogLevel
 from time import sleep
 import sys
 
+
 class RTPTopo(Topo):
     def build(self):
         s1 = self.addSwitch('s1')
@@ -25,51 +26,35 @@ class RTPTopo(Topo):
         self.addLink(s1, s2, cls=TCLink, bw=10)
 
 
+def apply_qos_tc(switch, iface):
+    print(f"[QoS] Aplicando HTB + prio + tbf em {iface} de {switch.name}...")
+
+    # Resetando configurações anteriores
+    switch.cmd(f'tc qdisc del dev {iface} root || true')
+
+    # 1. HTB Root
+    switch.cmd(f'tc qdisc add dev {iface} root handle 1: htb default 30')
+    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:1 htb rate 10mbit ceil 10mbit')
+
+    # 2. Classes com rate garantido
+    switch.cmd(f'tc class add dev {iface} parent 1:1 classid 1:10 htb rate 4mbit ceil 8mbit')  # RTP
+    switch.cmd(f'tc class add dev {iface} parent 1:1 classid 1:20 htb rate 2mbit ceil 5mbit')  # Iperf
+    switch.cmd(f'tc class add dev {iface} parent 1:1 classid 1:30 htb rate 1mbit ceil 2mbit')  # Best-effort
+
+    # 3. Filters para classificar pacotes
+    switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 1 u32 match ip dport 5004 0xffff flowid 1:10')
+    switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 1 u32 match ip dport 5006 0xffff flowid 1:10')
+    switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 2 u32 match ip dport 5001 0xffff flowid 1:20')
+
+    # 4. TBF para limitar burst de tráfego iperf
+    switch.cmd(f'tc qdisc add dev {iface} parent 1:20 handle 20: tbf rate 5mbit burst 10kb latency 70ms')
+
+
 def show_tc_config(switch, iface):
-    print(f"Configuração atual do tc em {iface} de {switch.name}:\n")
-    print(switch.cmd(f'tc qdisc show dev {iface}'))
-    print(switch.cmd(f'tc class show dev {iface}'))
-    print(switch.cmd(f'tc filter show dev {iface}'))
-
-
-def apply_egress_with_priority(switch, iface):
-    """
-    Aplica prioridade absoluta ao tráfego RTP usando a disciplina de enfileiramento 'prio'.
-
-    Esta técnica implementa Programação (Scheduling) com Filas por Prioridade,
-    permitindo que pacotes RTP (vídeo e áudio) sejam sempre transmitidos antes
-    de qualquer outro tipo de tráfego, independentemente da taxa de transmissão.
-
-    O Mininet já aplica automaticamente os seguintes comandos ao usar TCLink(bw=10):
-        tc qdisc add dev <iface> root handle 5: htb default 1
-        tc class add dev <iface> parent 5: classid 5:1 htb rate 10mbit
-
-    Esta função respeita essa configuração existente e funciona adicionando uma
-    qdisc do tipo 'prio' como filha da classe HTB padrão (5:1), permitindo que
-    pacotes RTP sejam atendidos com prioridade máxima dentro do limite de banda
-    de 10mbit definida a configuração da topologia do Mininet.
-
-    Técnicas de QoS utilizadas:
-    - Programação (Scheduling): prio com 3 bandas de prioridade (0 > 1 > 2)
-    - Filas por prioridade: banda 0 só esvaziada antes das outras
-    - Classificação de pacotes: com base na porta de destino (u32 match)
-    """
-
-    print(f"[QoS] Adicionando disciplina 'prio' como filha de HTB em {iface} de {switch.name}...")
-
-    # Programação (Scheduling):
-    # Adiciona qdisc 'prio' com 3 bandas (0 = mais prioritária) dentro da classe 5:1 do HTB
-    switch.cmd(f'tc qdisc add dev {iface} parent 5:1 handle 10: prio bands 3')
-
-    # Classificação de pacotes:
-    # Direciona tráfego RTP (portas 5004 e 5006) para banda 0 (prioridade mais alta)
-    switch.cmd(f'tc filter add dev {iface} protocol ip parent 10: prio 1 u32 match ip dport 5004 0xffff flowid 10:1')
-    switch.cmd(f'tc filter add dev {iface} protocol ip parent 10: prio 1 u32 match ip dport 5006 0xffff flowid 10:1')
-
-    # Direciona tráfego iperf (porta 5001) para banda 1 (prioridade intermediária)
-    switch.cmd(f'tc filter add dev {iface} protocol ip parent 10: prio 2 u32 match ip dport 5001 0xffff flowid 10:2')
-
-    # Todo o restante do tráfego irá automaticamente para a banda 2 (sem prioridade)
+    print(f"[INFO] Configuração de QoS no {iface} de {switch.name}:\n")
+    print(switch.cmd(f'tc -s qdisc show dev {iface}'))
+    print(switch.cmd(f'tc -s class show dev {iface}'))
+    print(switch.cmd(f'tc -s filter show dev {iface}'))
 
 
 def run():
@@ -78,14 +63,13 @@ def run():
     net.start()
 
     h1, h2, h3, h4 = net.get('h1', 'h2', 'h3', 'h4')
-    s1, s2 = net.get('s1', 's2')
+    s1 = net.get('s1')
 
-    print("Aplicando regras de QoS entre os switches s1 e s2...")
-    apply_egress_with_priority(s1, 's1-eth3')  # tráfego s1 → s2
-    show_tc_config(s1, 's1-eth3')
+    iface = 's1-eth3'
+    apply_qos_tc(s1, iface)
+    show_tc_config(s1, iface)
 
     print("Iniciando transmissão RTP de h1 para h2...")
-
     h1.cmd(
         'ffmpeg -re -i video.mp4 '
         '-map 0:v:0 -c:v libx264 -preset ultrafast -tune zerolatency '
@@ -98,23 +82,24 @@ def run():
 
     sleep(2)
 
-    print("Iniciando ffplay em h2...")
+    print("Iniciando captura de pacotes RTP com tcpdump em h2...")
+    h2.cmd('tcpdump -i h2-eth0 udp port 5004 -w /tmp/video_rtp.pcap &')
 
+
+    print("Iniciando ffplay em h2...")
     h2.cmd('ffplay -report -protocol_whitelist "file,udp,rtp" -fflags nobuffer -flags low_delay -i video.sdp '
-       '> /tmp/ffplay.log 2>&1 &')
+           '> /tmp/ffplay.log 2>&1 &')
 
     sleep(2)
 
     print("Iniciando monitoramento da interface do link s1 <-> s2...")
-    monitor = s1.popen('ifstat -i s1-eth3 0.5', stdout=sys.stdout)
+    monitor = s1.popen(f'ifstat -i {iface} 0.5', stdout=sys.stdout)
 
     sleep(10)
 
-    num_streams = 3
-    duration = 20
-    print(f"Iniciando {num_streams} fluxo(s) iperf UDP de h3 para h4 por {duration} segundos...")
-    for i in range(num_streams):
-        h3.cmd(f'iperf -c 10.0.0.4 -u -b 3M -t {duration} > /tmp/iperf_{i}.log 2>&1 &')
+    print("Iniciando tráfego iperf UDP de h3 para h4...")
+    for i in range(3):
+        h3.cmd(f'iperf -c 10.0.0.4 -u -b 3M -t 20 > /tmp/iperf_{i}.log 2>&1 &')
 
     print("Executando experimento por mais 40 segundos...")
     sleep(40)
@@ -124,6 +109,7 @@ def run():
 
     print("Encerrando rede...")
     net.stop()
+
 
 if __name__ == '__main__':
     setLogLevel('info')
