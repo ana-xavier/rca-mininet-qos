@@ -21,7 +21,7 @@ A topologia consiste em dois switches (`s1` e `s2`) conectando quatro hosts:
 Execute o script principal com o argumento `--tecnica` para selecionar a técnica de QoS desejada:
 
 ```bash
-sudo python3 experimento_qos_unificado.py --tecnica N
+sudo python3 experimento_qos.py --tecnica N
 ```
 
 Onde `N` é um número de 0 a 5:
@@ -39,7 +39,7 @@ Onde `N` é um número de 0 a 5:
 
 Executar o experimento com a técnica HTB + SFQ:
 ```bash
-sudo python3 experimento_qos_unificado.py --tecnica 4
+sudo python3 experimento_qos.py --tecnica 4
 ```
 
 ## Autor
