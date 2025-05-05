@@ -124,7 +124,7 @@ if __name__ == '__main__':
     setLogLevel('info')
     run(args.tecnica)
 
-    # Cálculo simples da média de bitrate após o experimento
+    # cálculo simples da média de bitrate após um experimento
     try:
         with open('/tmp/ffmpeg.log', 'r') as f:
             bitrates = []
