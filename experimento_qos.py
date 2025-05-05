@@ -44,7 +44,9 @@ def apply_sfq(switch, iface):
 
 def apply_htb(switch, iface):
     print(f"[QoS 3] Aplicando HTB com múltiplas classes...")
-    switch.cmd(f'tc qdisc add dev {iface} root handle 1: htb default 30')
+    switch.cmd(f'tc qdisc del dev {iface} root')
+
+    switch.cmd(f'tc qdisc add dev {iface} root handle 1: htb default 20')
     switch.cmd(f'tc class add dev {iface} parent 1: classid 1:10 htb rate 5mbit ceil 10mbit')
     switch.cmd(f'tc class add dev {iface} parent 1: classid 1:20 htb rate 3mbit ceil 10mbit')
     switch.cmd(f'tc class add dev {iface} parent 1: classid 1:30 htb rate 2mbit ceil 10mbit')
