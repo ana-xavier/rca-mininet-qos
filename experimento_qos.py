@@ -61,21 +61,26 @@ def apply_htb_sfq(switch, iface): # tecnica 4
     switch.cmd(f'tc qdisc add dev {iface} parent 1:20 handle 20: sfq perturb 10')
     switch.cmd(f'tc qdisc add dev {iface} parent 1:30 handle 30: sfq perturb 10')
 
-def apply_fwmark_filtering(switch, iface): # tecnica 5
+def apply_fwmark_filtering(switch, iface):
     print(f"[QoS 5] Aplicando HTB + SFQ com marcação por iptables...")
     switch.cmd(f'tc qdisc del dev {iface} root')
-    
+
     switch.cmd(f'tc qdisc add dev {iface} root handle 1: htb default 30')
-    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:10 htb rate 5mbit ceil 10mbit')
-    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:20 htb rate 3mbit ceil 10mbit')
-    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:30 htb rate 2mbit ceil 10mbit')
-    switch.cmd(f'tc qdisc add dev {iface} parent 1:10 handle 10: sfq perturb 10')
+    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:10 htb rate 8mbit ceil 10mbit')  # vídeo
+    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:20 htb rate 2mbit ceil 10mbit')  # outros
+    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:30 htb rate 1mbit ceil 10mbit')  # default
+
+    switch.cmd(f'tc qdisc add dev {iface} parent 1:10 handle 10: pfifo limit 100')  # vídeo (pfifo para reduzir jitter)
     switch.cmd(f'tc qdisc add dev {iface} parent 1:20 handle 20: sfq perturb 10')
     switch.cmd(f'tc qdisc add dev {iface} parent 1:30 handle 30: sfq perturb 10')
-    switch.cmd('iptables -t mangle -A PREROUTING -p udp --dport 5004 -j MARK --set-mark 10')
-    switch.cmd('iptables -t mangle -A PREROUTING -p udp --dport 5001 -j MARK --set-mark 20')
-    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip handle 10 fw flowid 1:10')
-    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip handle 20 fw flowid 1:20')
+
+    switch.cmd(f'iptables -t mangle -A PREROUTING -i {iface} -p udp --dport 5004 -j MARK --set-mark 10')
+    switch.cmd(f'iptables -t mangle -A PREROUTING -i {iface} -p udp --dport 5001 -j MARK --set-mark 20')
+
+    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip prio 1 handle 10 fw flowid 1:10')
+    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip prio 2 handle 20 fw flowid 1:20')
+    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip prio 3 u32 match ip protocol 17 0xff flowid 1:30')  # fallback
+
 
 def run(tecnica):
     topo = RTPTopo()
