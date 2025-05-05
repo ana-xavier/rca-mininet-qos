@@ -1,54 +1,49 @@
-# Emulação de rede com Mininet
+# Experimento de QoS com Mininet
 
-## Objetivo
+Este projeto simula diferentes técnicas de QoS (Qualidade de Serviço) utilizando o Mininet, `tc` (traffic control), `iptables`, e ferramentas como `iperf` e `ffmpeg`. 
 
-Simular uma rede com transmissão de vídeo usando RTP entre dois nós, degradar a qualidade com tráfego iperf, e depois aplicar QoS para preservar a qualidade do vídeo. Este roteiro foi elaborado para computadores com Ubuntu Linux ou outras distribuições baseadas em Debian. Caso necessário, recomenda-se utilizar uma [máquina virtual](https://www.osboxes.org/ubuntu/#ubuntu-24-04-vbox) com Ubuntu 24.04 para VirtualBox.
+## Requisitos
+- Python 3
+- Mininet
+- ffmpeg e ffplay
+- iperf
+- ifstat
 
-## Instalar Mininet
+## Estrutura
+A topologia consiste em dois switches (`s1` e `s2`) conectando quatro hosts:
+- `h1`: origem do fluxo de vídeo (via RTP com ffmpeg)
+- `h2`: destino do vídeo (reprodução com ffplay)
+- `h3`: origem de tráfego UDP (iperf)
+- `h4`: destino do tráfego UDP
 
-Instalar pacotes:
+## Como executar
 
-```bash
-apt-get install mininet 
-apt-get install openvswitch-testcontroller
-apt-get install iperf ifstat
-```
-
-Matar o controlador local:
-```bash
-sudo killall ovs-testcontroller
-```
-
-## Testar streaming de video via RTP
-
-Baixar um video de exemplo no computador local:
-```bash
-wget https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4 -O video.mp4
-```
-
-Para permitir que o player de vídeo (executado como root dentro do Mininet) acesse o sistema de som e exiba janelas na interface gráfica do usuário, é necessário conceder permissão ao usuário root para usar o servidor gráfico. Execute o seguinte comando no terminal antes de iniciar o experimento:
-```bash
-xhost +SI:localuser:root
-```
-
-Executar o experimento:
+Execute o script principal com o argumento `--tecnica` para selecionar a técnica de QoS desejada:
 
 ```bash
-sudo python experimento.py
+sudo python3 experimento_qos_unificado.py --tecnica N
 ```
 
-## Limpar o ambiente após uma emulação
+Onde `N` é um número de 0 a 5:
 
-Quando o mininet é interrompido bruscamente pode ser necessário realizar o um `cleanup` do ambiente.
+| Técnica | Descrição |
+|--------:|-----------|
+| 0 | Sem QoS (baseline) |
+| 1 | TBF (Token Bucket Filter) - limite de banda simples |
+| 2 | SFQ (Stochastic Fairness Queueing) - justiça entre fluxos |
+| 3 | HTB (Hierarchical Token Bucket) - alocação hierárquica de banda |
+| 4 | HTB + SFQ - aloca banda mínima por tipo de tráfego com justiça entre fluxos |
+| 5 | HTB + SFQ com `iptables` (fwmark) - classificação avançada por porta |
 
-Execute este comando para limpar interfaces virtuais, bridges e processos Mininet antigos:
+## Exemplo
 
+Executar o experimento com a técnica HTB + SFQ:
 ```bash
-sudo mn -c
+sudo python3 experimento_qos_unificado.py --tecnica 4
 ```
 
-## Referências:
+## Autor
+Ana Carolina Xavier, Érico Bis e Rubens Montanha.
 
-- Get Started With Mininet: https://mininet.org/download/
-- Ubuntu 24.04 Virtual Machine: https://www.osboxes.org/ubuntu/#ubuntu-24-04-VirtualBox
+---
 
