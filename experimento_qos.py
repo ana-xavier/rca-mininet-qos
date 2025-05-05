@@ -34,15 +34,15 @@ def show_tc_config(switch, iface):
 def apply_no_qos(switch, iface):
     print(f"[QoS 0] Sem configuração de QoS aplicada em {iface}.")
 
-def apply_tbf(switch, iface):
+def apply_tbf(switch, iface): # tecnica 1
     print(f"[QoS 1] Aplicando TBF (rate limit) em {iface}...")
     switch.cmd(f'tc qdisc add dev {iface} root tbf rate 100mbit burst 32kbit latency 70ms')
 
-def apply_sfq(switch, iface):
+def apply_sfq(switch, iface): # tecnica 2
     print(f"[QoS 2] Aplicando SFQ simples em {iface}...")
     switch.cmd(f'tc qdisc add dev {iface} root sfq perturb 10')
 
-def apply_htb(switch, iface):
+def apply_htb(switch, iface): # tecnica 3
     print(f"[QoS 3] Aplicando HTB com múltiplas classes...")
     switch.cmd(f'tc qdisc del dev {iface} root')
 
@@ -54,15 +54,17 @@ def apply_htb(switch, iface):
     switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 1 u32 match ip dport 5006 0xffff flowid 1:10')
     switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 2 u32 match ip dport 5001 0xffff flowid 1:20')
 
-def apply_htb_sfq(switch, iface):
+def apply_htb_sfq(switch, iface): # tecnica 4
     print(f"[QoS 4] Aplicando HTB + SFQ por classe...")
     apply_htb(switch, iface)
     switch.cmd(f'tc qdisc add dev {iface} parent 1:10 handle 10: sfq perturb 10')
     switch.cmd(f'tc qdisc add dev {iface} parent 1:20 handle 20: sfq perturb 10')
     switch.cmd(f'tc qdisc add dev {iface} parent 1:30 handle 30: sfq perturb 10')
 
-def apply_fwmark_filtering(switch, iface):
+def apply_fwmark_filtering(switch, iface): # tecnica 5
     print(f"[QoS 5] Aplicando HTB + SFQ com marcação por iptables...")
+    switch.cmd(f'tc qdisc del dev {iface} root')
+    
     switch.cmd(f'tc qdisc add dev {iface} root handle 1: htb default 30')
     switch.cmd(f'tc class add dev {iface} parent 1: classid 1:10 htb rate 5mbit ceil 10mbit')
     switch.cmd(f'tc class add dev {iface} parent 1: classid 1:20 htb rate 3mbit ceil 10mbit')
