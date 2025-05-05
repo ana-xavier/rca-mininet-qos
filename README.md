@@ -24,7 +24,7 @@ Execute o script principal com o argumento `--tecnica` para selecionar a técnic
 sudo python3 experimento_qos.py --tecnica N
 ```
 
-Onde `N` é um número de 0 a 5:
+Onde `N` é um número de 0 a 4:
 
 | Técnica | Descrição |
 |--------:|-----------|
@@ -33,7 +33,6 @@ Onde `N` é um número de 0 a 5:
 | 2 | SFQ (Stochastic Fairness Queueing) - justiça entre fluxos |
 | 3 | HTB (Hierarchical Token Bucket) - alocação hierárquica de banda |
 | 4 | HTB + SFQ - aloca banda mínima por tipo de tráfego com justiça entre fluxos |
-| 5 | HTB + SFQ com `iptables` (fwmark) - classificação avançada por porta |
 
 ## Exemplo
 

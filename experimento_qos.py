@@ -61,27 +61,6 @@ def apply_htb_sfq(switch, iface): # tecnica 4
     switch.cmd(f'tc qdisc add dev {iface} parent 1:20 handle 20: sfq perturb 10')
     switch.cmd(f'tc qdisc add dev {iface} parent 1:30 handle 30: sfq perturb 10')
 
-def apply_fwmark_filtering(switch, iface):
-    print(f"[QoS 5] Aplicando HTB + SFQ com marcação por iptables...")
-    switch.cmd(f'tc qdisc del dev {iface} root')
-
-    switch.cmd(f'tc qdisc add dev {iface} root handle 1: htb default 30')
-    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:10 htb rate 8mbit ceil 10mbit')  # vídeo
-    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:20 htb rate 2mbit ceil 10mbit')  # outros
-    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:30 htb rate 1mbit ceil 10mbit')  # default
-
-    switch.cmd(f'tc qdisc add dev {iface} parent 1:10 handle 10: pfifo limit 100')  # vídeo (pfifo para reduzir jitter)
-    switch.cmd(f'tc qdisc add dev {iface} parent 1:20 handle 20: sfq perturb 10')
-    switch.cmd(f'tc qdisc add dev {iface} parent 1:30 handle 30: sfq perturb 10')
-
-    switch.cmd(f'iptables -t mangle -A PREROUTING -i {iface} -p udp --dport 5004 -j MARK --set-mark 10')
-    switch.cmd(f'iptables -t mangle -A PREROUTING -i {iface} -p udp --dport 5001 -j MARK --set-mark 20')
-
-    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip prio 1 handle 10 fw flowid 1:10')
-    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip prio 2 handle 20 fw flowid 1:20')
-    switch.cmd(f'tc filter add dev {iface} parent 1:0 protocol ip prio 3 u32 match ip protocol 17 0xff flowid 1:30')  # fallback
-
-
 def run(tecnica):
     topo = RTPTopo()
     net = Mininet(topo=topo, link=TCLink, switch=OVSKernelSwitch, controller=DefaultController)
@@ -101,10 +80,8 @@ def run(tecnica):
         apply_htb(s1, iface)
     elif tecnica == 4:
         apply_htb_sfq(s1, iface)
-    elif tecnica == 5:
-        apply_fwmark_filtering(s1, iface)
     else:
-        print("Técnica inválida. Escolha de 0 a 5.")
+        print("Técnica inválida. Escolha de 0 a 4.")
         net.stop()
         return
 
@@ -142,7 +119,26 @@ def run(tecnica):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--tecnica', type=int, default=0, help='Técnica de QoS (0 a 5)')
+    parser.add_argument('--tecnica', type=int, default=0, help='Técnica de QoS (0 a 4)')
     args = parser.parse_args()
     setLogLevel('info')
     run(args.tecnica)
+
+    # Cálculo simples da média de bitrate após o experimento
+    try:
+        with open('/tmp/ffmpeg.log', 'r') as f:
+            bitrates = []
+            for line in f:
+                if "bitrate=" in line:
+                    try:
+                        bitrate = float(line.split("bitrate=")[1].split("kbits")[0].strip())
+                        bitrates.append(bitrate)
+                    except:
+                        continue
+        if bitrates:
+            media = sum(bitrates) / len(bitrates)
+            print(f"\n[Bitrate médio do ffmpeg] {media:.2f} kbits/s (baseado em {len(bitrates)} amostras)")
+        else:
+            print("\n[Bitrate médio do ffmpeg] Nenhuma linha com bitrate encontrada no log.")
+    except FileNotFoundError:
+        print("\n[Erro] Arquivo '/tmp/ffmpeg.log' não encontrado.")
