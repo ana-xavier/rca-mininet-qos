@@ -36,7 +36,7 @@ def apply_no_qos(switch, iface):
 
 def apply_tbf(switch, iface):
     print(f"[QoS 1] Aplicando TBF (rate limit) em {iface}...")
-    switch.cmd(f'tc qdisc add dev {iface} root tbf rate 5mbit burst 32kbit latency 800ms')
+    switch.cmd(f'tc qdisc add dev {iface} root tbf rate 100mbit burst 32kbit latency 70ms')
 
 def apply_sfq(switch, iface):
     print(f"[QoS 2] Aplicando SFQ simples em {iface}...")
