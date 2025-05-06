@@ -7,6 +7,7 @@ from mininet.node import OVSKernelSwitch, DefaultController
 from mininet.log import setLogLevel
 from time import sleep
 import sys
+import argparse
 
 class RTPTopo(Topo):
     def build(self):
@@ -24,68 +25,69 @@ class RTPTopo(Topo):
         self.addLink(h4, s2, cls=TCLink, bw=10)
         self.addLink(s1, s2, cls=TCLink, bw=10)
 
-
 def show_tc_config(switch, iface):
     print(f"Configuração atual do tc em {iface} de {switch.name}:\n")
     print(switch.cmd(f'tc qdisc show dev {iface}'))
     print(switch.cmd(f'tc class show dev {iface}'))
     print(switch.cmd(f'tc filter show dev {iface}'))
 
+def apply_no_qos(switch, iface):
+    print(f"[QoS 0] Sem configuração de QoS aplicada em {iface}.")
 
-def apply_egress_with_priority(switch, iface):
-    """
-    Aplica prioridade absoluta ao tráfego RTP usando a disciplina de enfileiramento 'prio'.
+def apply_tbf(switch, iface): # tecnica 1
+    print(f"[QoS 1] Aplicando TBF (rate limit) em {iface}...")
+    switch.cmd(f'tc qdisc add dev {iface} root tbf rate 100mbit burst 32kbit latency 70ms')
 
-    Esta técnica implementa Programação (Scheduling) com Filas por Prioridade,
-    permitindo que pacotes RTP (vídeo e áudio) sejam sempre transmitidos antes
-    de qualquer outro tipo de tráfego, independentemente da taxa de transmissão.
+def apply_sfq(switch, iface): # tecnica 2
+    print(f"[QoS 2] Aplicando SFQ simples em {iface}...")
+    switch.cmd(f'tc qdisc add dev {iface} root sfq perturb 10')
 
-    O Mininet já aplica automaticamente os seguintes comandos ao usar TCLink(bw=10):
-        tc qdisc add dev <iface> root handle 5: htb default 1
-        tc class add dev <iface> parent 5: classid 5:1 htb rate 10mbit
+def apply_htb(switch, iface): # tecnica 3
+    print(f"[QoS 3] Aplicando HTB com múltiplas classes...")
+    switch.cmd(f'tc qdisc del dev {iface} root')
 
-    Esta função respeita essa configuração existente e funciona adicionando uma
-    qdisc do tipo 'prio' como filha da classe HTB padrão (5:1), permitindo que
-    pacotes RTP sejam atendidos com prioridade máxima dentro do limite de banda
-    de 10mbit definida a configuração da topologia do Mininet.
+    switch.cmd(f'tc qdisc add dev {iface} root handle 1: htb default 20')
+    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:10 htb rate 5mbit ceil 10mbit')
+    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:20 htb rate 3mbit ceil 10mbit')
+    switch.cmd(f'tc class add dev {iface} parent 1: classid 1:30 htb rate 2mbit ceil 10mbit')
+    switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 1 u32 match ip dport 5004 0xffff flowid 1:10')
+    switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 1 u32 match ip dport 5006 0xffff flowid 1:10')
+    switch.cmd(f'tc filter add dev {iface} protocol ip parent 1:0 prio 2 u32 match ip dport 5001 0xffff flowid 1:20')
 
-    Técnicas de QoS utilizadas:
-    - Programação (Scheduling): prio com 3 bandas de prioridade (0 > 1 > 2)
-    - Filas por prioridade: banda 0 só esvaziada antes das outras
-    - Classificação de pacotes: com base na porta de destino (u32 match)
-    """
+def apply_htb_sfq(switch, iface): # tecnica 4
+    print(f"[QoS 4] Aplicando HTB + SFQ por classe...")
+    apply_htb(switch, iface)
+    switch.cmd(f'tc qdisc add dev {iface} parent 1:10 handle 10: sfq perturb 10')
+    switch.cmd(f'tc qdisc add dev {iface} parent 1:20 handle 20: sfq perturb 10')
+    switch.cmd(f'tc qdisc add dev {iface} parent 1:30 handle 30: sfq perturb 10')
 
-    print(f"[QoS] Adicionando disciplina 'prio' como filha de HTB em {iface} de {switch.name}...")
-
-    # Programação (Scheduling):
-    # Adiciona qdisc 'prio' com 3 bandas (0 = mais prioritária) dentro da classe 5:1 do HTB
-    switch.cmd(f'tc qdisc add dev {iface} parent 5:1 handle 10: prio bands 3')
-
-    # Classificação de pacotes:
-    # Direciona tráfego RTP (portas 5004 e 5006) para banda 0 (prioridade mais alta)
-    switch.cmd(f'tc filter add dev {iface} protocol ip parent 10: prio 1 u32 match ip dport 5004 0xffff flowid 10:1')
-    switch.cmd(f'tc filter add dev {iface} protocol ip parent 10: prio 1 u32 match ip dport 5006 0xffff flowid 10:1')
-
-    # Direciona tráfego iperf (porta 5001) para banda 1 (prioridade intermediária)
-    switch.cmd(f'tc filter add dev {iface} protocol ip parent 10: prio 2 u32 match ip dport 5001 0xffff flowid 10:2')
-
-    # Todo o restante do tráfego irá automaticamente para a banda 2 (sem prioridade)
-
-
-def run():
+def run(tecnica):
     topo = RTPTopo()
     net = Mininet(topo=topo, link=TCLink, switch=OVSKernelSwitch, controller=DefaultController)
     net.start()
 
     h1, h2, h3, h4 = net.get('h1', 'h2', 'h3', 'h4')
-    s1, s2 = net.get('s1', 's2')
+    s1, _ = net.get('s1', 's2')
+    iface = 's1-eth3'
 
-    print("Aplicando regras de QoS entre os switches s1 e s2...")
-    apply_egress_with_priority(s1, 's1-eth3')  # tráfego s1 → s2
-    show_tc_config(s1, 's1-eth3')
+    if tecnica == 0:
+        apply_no_qos(s1, iface)
+    elif tecnica == 1:
+        apply_tbf(s1, iface)
+    elif tecnica == 2:
+        apply_sfq(s1, iface)
+    elif tecnica == 3:
+        apply_htb(s1, iface)
+    elif tecnica == 4:
+        apply_htb_sfq(s1, iface)
+    else:
+        print("Técnica inválida. Escolha de 0 a 4.")
+        net.stop()
+        return
+
+    show_tc_config(s1, iface)
 
     print("Iniciando transmissão RTP de h1 para h2...")
-
     h1.cmd(
         'ffmpeg -re -i video.mp4 '
         '-map 0:v:0 -c:v libx264 -preset ultrafast -tune zerolatency '
@@ -97,34 +99,46 @@ def run():
     )
 
     sleep(2)
-
     print("Iniciando ffplay em h2...")
-
-    h2.cmd('ffplay -report -protocol_whitelist "file,udp,rtp" -fflags nobuffer -flags low_delay -i video.sdp '
-       '> /tmp/ffplay.log 2>&1 &')
+    h2.cmd('ffplay -protocol_whitelist "file,udp,rtp" -fflags nobuffer -flags low_delay -i video.sdp '
+           '> /tmp/ffplay.log 2>&1 &')
 
     sleep(2)
-
-    print("Iniciando monitoramento da interface do link s1 <-> s2...")
-    monitor = s1.popen('ifstat -i s1-eth3 0.5', stdout=sys.stdout)
+    print("Monitorando interface {iface}...")
+    monitor = s1.popen(f'ifstat -i {iface} 0.5', stdout=sys.stdout)
 
     sleep(10)
+    print("Iniciando 3 fluxos iperf UDP de h3 para h4 por 20 segundos...")
+    for i in range(3):
+        h3.cmd(f'iperf -c 10.0.0.4 -u -b 3M -t 20 > /tmp/iperf_{i}.log 2>&1 &')
 
-    num_streams = 3
-    duration = 20
-    print(f"Iniciando {num_streams} fluxo(s) iperf UDP de h3 para h4 por {duration} segundos...")
-    for i in range(num_streams):
-        h3.cmd(f'iperf -c 10.0.0.4 -u -b 3M -t {duration} > /tmp/iperf_{i}.log 2>&1 &')
-
-    print("Executando experimento por mais 40 segundos...")
     sleep(40)
-
-    print("Encerrando monitoramento...")
+    print("Encerrando monitoramento e rede...")
     monitor.terminate()
-
-    print("Encerrando rede...")
     net.stop()
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--tecnica', type=int, default=0, help='Técnica de QoS (0 a 4)')
+    args = parser.parse_args()
     setLogLevel('info')
-    run()
+    run(args.tecnica)
+
+    # cálculo simples da média de bitrate após um experimento
+    try:
+        with open('/tmp/ffmpeg.log', 'r') as f:
+            bitrates = []
+            for line in f:
+                if "bitrate=" in line:
+                    try:
+                        bitrate = float(line.split("bitrate=")[1].split("kbits")[0].strip())
+                        bitrates.append(bitrate)
+                    except:
+                        continue
+        if bitrates:
+            media = sum(bitrates) / len(bitrates)
+            print(f"\n[Bitrate médio do ffmpeg] {media:.2f} kbits/s (baseado em {len(bitrates)} amostras)")
+        else:
+            print("\n[Bitrate médio do ffmpeg] Nenhuma linha com bitrate encontrada no log.")
+    except FileNotFoundError:
+        print("\n[Erro] Arquivo '/tmp/ffmpeg.log' não encontrado.")
